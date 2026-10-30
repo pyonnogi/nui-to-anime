@@ -16,16 +16,22 @@ gemini_client = genai.Client(api_key=gemini_api_key)
 hf_token = os.getenv("HF_TOKEN")
 
 def prepare_image(image_path: str) -> str:
-    """画像の向き補正とリサイズ（768px上限で動画生成に最適化）"""
+    """EXIF向きを正し、512x512の正方形に中央クロップ＆リサイズ（Diffusion I2Vの標準入力形式）"""
     img = Image.open(image_path)
     img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
 
-    max_dim = 768
-    if max(img.width, img.height) > max_dim:
-        scale = max_dim / max(img.width, img.height)
-        new_size = (int(img.width * scale), int(img.height * scale))
-        img = img.resize(new_size, Image.Resampling.LANCZOS)
+    # Diffusion系モデルが最もエラーを起こさない 512x512 にセンタリングクロップ
+    target_size = 512
+    width, height = img.size
+    min_dim = min(width, height)
+    
+    left = (width - min_dim) / 2
+    top = (height - min_dim) / 2
+    right = (width + min_dim) / 2
+    bottom = (height + min_dim) / 2
+    img = img.crop((left, top, right, bottom))
+    img = img.resize((target_size, target_size), Image.Resampling.LANCZOS)
 
     temp_dir = tempfile.gettempdir()
     processed_path = os.path.join(temp_dir, f"input_{uuid.uuid4().hex[:8]}.jpg")
@@ -55,47 +61,41 @@ def generate_motion_prompt(image_path: str, instruction: str) -> str:
         print(f"[Gemini Error]: {e}")
         return f"A plushie subtly moving, cute motion, {instruction}, static background"
 
-def call_hf_video_api(image_path: str, prompt: str) -> str:
-    """Hugging Face Space APIを安全に呼び出す"""
+def generate_video_api(image_path: str, prompt: str) -> str:
+    """
+    安定稼働している無料動画生成Spaceを順次呼び出し
+    """
+    # 候補1: svd (Stable Video Diffusion - 公式標準)
     try:
-        # 1. 相手のSpace定義を確認
-        client = Client("multimodalart/wan2-1-fast", token=hf_token)
-        api_info = client.view_api(all_endpoints=True, return_format="dict")
-        endpoints = api_info.get("named_endpoints", {})
-        
-        # エンドポイントの引数構成をログに出力
-        target_ep = "/generate_video" if "/generate_video" in endpoints else list(endpoints.keys())[0]
-        params = endpoints[target_ep].get("parameters", [])
-        print(f"[Endpoint Selected]: {target_ep}, required params count: {len(params)}")
+        print("[Video Gen]: Calling multimodalart/stable-video-diffusion...")
+        client = Client("multimodalart/stable-video-diffusion", token=hf_token)
+        result = client.predict(
+            handle_file(image_path), # input image
+            0,                       # seed
+            25,                      # motion bucket id (1-255: 小さめの動き)
+            6,                       # fps
+            api_name="/video"
+        )
+        if result:
+            return result
+    except Exception as e:
+        print(f"[SVD Error]: {e}")
 
-        # パラメータ数に応じて適切な引数を詰める
-        args = [handle_file(image_path), prompt]
-        if len(params) >= 3:
-            # ネガティブプロンプト
-            args.append("camera movement, blurry, jerky, low quality")
-        # 4つ目以降にシード値やステップ数がある場合のダミー引数補完
-        for param in params[len(args):]:
-            default_val = param.get("parameter_default")
-            if default_val is not None:
-                args.append(default_val)
-            else:
-                args.append(0)
-
-        job = client.submit(*args, api_name=target_ep)
-        result = job.result()
-        return result
-
-    except Exception as e1:
-        print(f"[Wan2.1 Error]: {e1}, trying LTX-Video fallback...")
-        # Wan2.1が過負荷または引数不一致の場合、軽量なLTX-Videoにフォールバック
-        client_fallback = Client("Lightricks/LTX-Video", token=hf_token)
-        job = client_fallback.submit(
+    # 候補2: ali-vilab/i2vgen-xl (Alibaba Image-to-Video)
+    try:
+        print("[Video Gen]: Calling ali-vilab/i2vgen-xl...")
+        client = Client("ali-vilab/i2vgen-xl", token=hf_token)
+        result = client.predict(
             handle_file(image_path),
             prompt,
-            "camera movement, low quality",
-            api_name="/generate_video"
+            api_name="/run"
         )
-        return job.result()
+        if result:
+            return result
+    except Exception as e:
+        print(f"[I2VGen-XL Error]: {e}")
+
+    raise RuntimeError("現在無料の動画生成サーバーが混雑または停止しています。少し時間を置いて再試行してください。")
 
 def process_animation(image_data, instruction: str):
     if image_data is None:
@@ -112,10 +112,10 @@ def process_animation(image_data, instruction: str):
 
     # 2. 動画生成実行
     try:
-        result = call_hf_video_api(safe_image_path, motion_prompt)
+        result = generate_video_api(safe_image_path, motion_prompt)
     except Exception as e:
         print(f"[Generation Final Error]: {repr(e)}")
-        raise gr.Error(f"動画生成に失敗しました: {e}")
+        raise gr.Error(str(e))
     finally:
         if os.path.exists(safe_image_path):
             os.remove(safe_image_path)
@@ -123,6 +123,7 @@ def process_animation(image_data, instruction: str):
     if isinstance(result, (list, tuple)):
         result = result[0]
 
+    # 一時領域に退避
     temp_dir = tempfile.gettempdir()
     temp_output_path = os.path.join(temp_dir, f"temp_{os.path.basename(result)}")
     shutil.copy(result, temp_output_path)
