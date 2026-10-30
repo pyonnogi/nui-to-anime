@@ -10,27 +10,33 @@ from PIL import Image
 load_dotenv()
 
 # クライアント初期化
-gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=gemini_api_key)
 hf_token = os.getenv("HF_TOKEN")
 
 def generate_motion_prompt(image_path: str, instruction: str) -> str:
     """Gemini 2.5 Flash で動画指示文を最適化"""
-    img = Image.open(image_path)
-    prompt = f"""
-    The user wants to animate this plushie/toy.
-    User instruction: {instruction}
-    
-    Output ONLY a concise, high-quality prompt in English for an Image-to-Video diffusion model.
-    Requirements:
-    - Keep background static.
-    - Subtle, natural, cute movement.
-    - Output just the raw prompt text without extra explanation.
-    """
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[img, prompt],
-    )
-    return response.text.strip()
+    try:
+        img = Image.open(image_path)
+        prompt = f"""
+        The user wants to animate this plushie/toy.
+        User instruction: {instruction}
+        
+        Output ONLY a concise, high-quality prompt in English for an Image-to-Video diffusion model.
+        Requirements:
+        - Keep background static.
+        - Subtle, natural, cute movement.
+        - Output just the raw prompt text without extra explanation.
+        """
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[img, prompt],
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"[Gemini Error]: {e}")
+        # Geminiでエラーが出た場合の安全なフォールバック
+        return f"A plushie subtly moving, cute motion, {instruction}, static background"
 
 def process_animation(image_data, instruction: str):
     if image_data is None:
@@ -38,19 +44,25 @@ def process_animation(image_data, instruction: str):
     if not instruction:
         instruction = "Subtle wiggle and breathing movement"
 
+    # Gradioの画像データからパスを取得
     image_path = image_data["background"] if isinstance(image_data, dict) else image_data
 
     # 1. Geminiでプロンプト生成
     motion_prompt = generate_motion_prompt(image_path, instruction)
+    print(f"[Generated Prompt]: {motion_prompt}")
 
-    # 2. 無料の動画生成Space API呼び出し
-    client = Client("multimodalart/wan2-1-fast", token=hf_token)
-    result = client.predict(
-        image=handle_file(image_path),
-        prompt=motion_prompt,
-        negative_prompt="camera movement, distorted face, low quality",
-        api_name="/generate_video",
-    )
+    # 2. 無料の動画生成Space API呼び出し (token=引数を使用)
+    try:
+        client = Client("multimodalart/wan2-1-fast", token=hf_token)
+        result = client.predict(
+            image=handle_file(image_path),
+            prompt=motion_prompt,
+            negative_prompt="camera movement, distorted face, low quality",
+            api_name="/generate_video",
+        )
+    except Exception as e:
+        print(f"[HF Space Error]: {e}")
+        raise gr.Error(f"動画生成APIの呼び出しに失敗しました: {e}")
 
     if isinstance(result, (list, tuple)):
         result = result[0]
@@ -87,7 +99,6 @@ with gr.Blocks(title="nui-to-anime") as demo:
     )
 
 if __name__ == "__main__":
-    # Render環境で割り振られるPORTを取得（未指定時は7860）
     port = int(os.environ.get("PORT", 7860))
     demo.queue(default_concurrency_limit=1).launch(
         server_name="0.0.0.0",
