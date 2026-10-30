@@ -44,7 +44,7 @@ def process_animation(image_data, instruction: str):
     motion_prompt = generate_motion_prompt(image_path, instruction)
 
     # 2. 無料の動画生成Space API呼び出し
-    client = Client("multimodalart/wan2-1-fast", hf_token=hf_token)
+    client = Client("multimodalart/wan2-1-fast", token=hf_token)
     result = client.predict(
         image=handle_file(image_path),
         prompt=motion_prompt,
