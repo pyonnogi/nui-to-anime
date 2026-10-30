@@ -35,7 +35,6 @@ def generate_motion_prompt(image_path: str, instruction: str) -> str:
         return response.text.strip()
     except Exception as e:
         print(f"[Gemini Error]: {e}")
-        # Geminiでエラーが出た場合の安全なフォールバック
         return f"A plushie subtly moving, cute motion, {instruction}, static background"
 
 def process_animation(image_data, instruction: str):
@@ -51,23 +50,31 @@ def process_animation(image_data, instruction: str):
     motion_prompt = generate_motion_prompt(image_path, instruction)
     print(f"[Generated Prompt]: {motion_prompt}")
 
-    # 2. 無料の動画生成Space API呼び出し (token=引数を使用)
+    # 2. 動画生成API呼び出し
     try:
+        # Spaceクライアント初期化
         client = Client("multimodalart/wan2-1-fast", token=hf_token)
+        
+        # SpaceのAPI一覧をログに出力（デバッグ用）
+        api_info = client.view_api(all_endpoints=True, return_format="dict")
+        print(f"[Available Endpoints]: {list(api_info.get('named_endpoints', {}).keys())}")
+
+        # 呼び出し実行（Wan2.1 Fastの標準エンドポイント形式）
         result = client.predict(
             image=handle_file(image_path),
             prompt=motion_prompt,
-            negative_prompt="camera movement, distorted face, low quality",
-            api_name="/generate_video",
+            negative_prompt="camera movement, blurry, jerky, low quality",
+            api_name="/generate_video"
         )
     except Exception as e:
-        print(f"[HF Space Error]: {e}")
-        raise gr.Error(f"動画生成APIの呼び出しに失敗しました: {e}")
+        print(f"[HF Space Error Details]: {repr(e)}")
+        # 呼び出し失敗時の詳細を画面側にも表示
+        raise gr.Error(f"APIエラー詳細: {e}")
 
     if isinstance(result, (list, tuple)):
         result = result[0]
 
-    # 一時領域に退避してストレージ保持を防ぐ
+    # 一時領域に退避
     temp_dir = tempfile.gettempdir()
     temp_output_path = os.path.join(temp_dir, f"temp_{os.path.basename(result)}")
     shutil.copy(result, temp_output_path)
