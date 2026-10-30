@@ -1,0 +1,5 @@
+google-genai
+gradio
+gradio_client
+pillow
+python-dotenv
