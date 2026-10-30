@@ -46,7 +46,7 @@ def generate_video_guide(image_path: str, instruction: str, motion_type: str):
 
         full_text = response.text
 
-        # ワンクリックコピー用の英語プロンプトを別途抽出
+        # コピー用の英語プロンプト抽出
         extract_prompt = f"""
         Extract ONLY the primary diffusion-ready English prompt from the text below. 
         Do not include markdown tags, titles, or notes. Output just the raw text:
@@ -65,11 +65,11 @@ def generate_video_guide(image_path: str, instruction: str, motion_type: str):
         print(f"[Gemini Error]: {e}")
         raise gr.Error(f"Gemini API呼び出し中にエラーが発生しました: {e}")
 
-# Gradio UI構築
-with gr.Blocks(title="nui-to-anime | 動画生成プロンプト最適化スタジオ", theme=gr.themes.Soft()) as demo:
+# Gradio UI構築（Gradio 6.x 互換）
+with gr.Blocks(title="nui-to-anime") as demo:
     gr.Markdown("# 🧸 nui-to-anime Studio")
     gr.Markdown(
-        "ぬいぐるみの写真をアップロードし、やりたい動きを日本語で入力してください。"
+        "ぬいぐるみの写真をアップロードし、やりたい動きを日本語で入力してください。\n"
         "Geminiが画像の特徴を解析し、動画生成AIで破綻なく動かすための**最適化プロンプト・カメラ指示・パラメータ設定**を作成します。"
     )
 
@@ -92,11 +92,9 @@ with gr.Blocks(title="nui-to-anime | 動画生成プロンプト最適化スタ�
             copy_prompt = gr.Textbox(
                 label="📋 コピペ用プロンプト（動画AI入力用）",
                 interactive=False,
-                show_copy_button=True,
-                placeholder="生成された英語プロンプトがここに表示され、右上のボタンでワンクリックコピーできます。"
+                placeholder="生成された英語プロンプトがここに表示されます。"
             )
             full_guide = gr.Markdown(
-                label="詳細パラメータ & ガイド",
                 value="*ここにGeminiによる詳細な解析結果とパラメータ設定が表示されます。*"
             )
 
@@ -110,5 +108,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
     demo.queue().launch(
         server_name="0.0.0.0",
-        server_port=port
+        server_port=port,
+        theme=gr.themes.Soft()
     )
