@@ -52,23 +52,17 @@ def process_animation(image_data, instruction: str):
 
     # 2. 動画生成API呼び出し
     try:
-        # Spaceクライアント初期化
         client = Client("multimodalart/wan2-1-fast", token=hf_token)
-        
-        # SpaceのAPI一覧をログに出力（デバッグ用）
-        api_info = client.view_api(all_endpoints=True, return_format="dict")
-        print(f"[Available Endpoints]: {list(api_info.get('named_endpoints', {}).keys())}")
 
-        # 呼び出し実行（Wan2.1 Fastの標準エンドポイント形式）
+        # 位置引数で順番に渡す形式に変更
         result = client.predict(
-            image=handle_file(image_path),
-            prompt=motion_prompt,
-            negative_prompt="camera movement, blurry, jerky, low quality",
+            handle_file(image_path),   # 1番目: 画像
+            motion_prompt,             # 2番目: プロンプト
+            "camera movement, blurry, jerky, low quality", # 3番目: ネガティブプロンプト
             api_name="/generate_video"
         )
     except Exception as e:
         print(f"[HF Space Error Details]: {repr(e)}")
-        # 呼び出し失敗時の詳細を画面側にも表示
         raise gr.Error(f"APIエラー詳細: {e}")
 
     if isinstance(result, (list, tuple)):
